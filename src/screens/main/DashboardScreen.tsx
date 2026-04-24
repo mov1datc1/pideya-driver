@@ -14,7 +14,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../../context/AuthContext';
 import * as ordersService from '../../services/orders';
 import { colors, spacing, radius } from '../../constants/theme';
-import { timeAgo, formatPrice, statusLabel } from '../../utils/formatters';
+import { timeAgo, formatPrice, statusLabel, normalizeItem } from '../../utils/formatters';
 import type { Order } from '../../types/database';
 import type { RootStackParamList } from '../../types/navigation';
 
@@ -148,8 +148,8 @@ export default function DashboardScreen() {
       {/* Items summary */}
       <View style={styles.itemsSummary}>
         <Text style={styles.itemsText}>
-          {item.items.reduce((sum, i) => sum + i.quantity, 0)} producto
-          {item.items.reduce((sum, i) => sum + i.quantity, 0) !== 1 ? 's' : ''}
+          {item.items.reduce((sum, i) => sum + (normalizeItem(i).quantity), 0)} producto
+          {item.items.reduce((sum, i) => sum + (normalizeItem(i).quantity), 0) !== 1 ? 's' : ''}
         </Text>
         <Text style={styles.totalText}>{formatPrice(item.total)}</Text>
       </View>

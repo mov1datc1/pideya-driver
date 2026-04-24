@@ -1,8 +1,12 @@
+import type { OrderItemJSON } from '../types/database';
+
 /**
- * Formatea precio en MXN
+ * Formatea precio en MXN. Returns $0.00 for NaN/null/undefined.
  */
-export const formatPrice = (amount: number): string =>
-  `$${amount.toFixed(2)}`;
+export const formatPrice = (amount: number | null | undefined): string => {
+  const n = Number(amount);
+  return isNaN(n) ? '$0.00' : `$${n.toFixed(2)}`;
+};
 
 /**
  * Formatea fecha relativa (hace X minutos)
@@ -61,3 +65,30 @@ export const haversineKm = (
  */
 export const formatDistance = (km: number): string =>
   km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`;
+
+/**
+ * Normalizes an order item from either web or mobile format
+ * into a consistent shape with { name, price, quantity }.
+ */
+export const normalizeItem = (
+  raw: OrderItemJSON,
+): { id: string; name: string; price: number; quantity: number; notes?: string; options?: { label: string; price: number }[] } => {
+  return {
+    id: raw.id ?? raw.menu_item_id ?? '',
+    name: raw.name ?? 'Producto',
+    price: Number(raw.price ?? raw.unit_price ?? raw.subtotal ?? 0),
+    quantity: Number(raw.quantity ?? raw.qty ?? 1),
+    notes: raw.notes,
+    options: raw.options ?? (raw.option_label ? [{ label: raw.option_label, price: 0 }] : undefined),
+  };
+};
+
+/**
+ * Returns true if coordinates are valid (not 0,0 / null / undefined).
+ */
+export const isValidCoordinate = (lat: number | null | undefined, lng: number | null | undefined): boolean => {
+  if (lat == null || lng == null) return false;
+  // 0,0 is in the Gulf of Guinea — treat as invalid for Mexican food delivery
+  if (lat === 0 && lng === 0) return false;
+  return true;
+};

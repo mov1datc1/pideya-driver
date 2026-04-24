@@ -12,12 +12,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker } from 'react-native-maps';
 import * as ordersService from '../../services/orders';
 import * as deliveryService from '../../services/delivery';
 import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, radius } from '../../constants/theme';
-import { formatPrice, statusLabel, haversineKm, formatDistance } from '../../utils/formatters';
+import { formatPrice, statusLabel, haversineKm, formatDistance, normalizeItem, isValidCoordinate } from '../../utils/formatters';
 import type { Order } from '../../types/database';
 import type { RootStackParamList } from '../../types/navigation';
 
@@ -93,11 +93,14 @@ export default function OrderDetailScreen({ route, navigation }: Props) {
     );
   }
 
+  const hasClientCoords = isValidCoordinate(order.client_lat, order.client_lng);
+  const hasRestCoords = isValidCoordinate(restaurant?.lat, restaurant?.lng);
+
   const distance =
-    restaurant?.lat && restaurant?.lng
+    hasClientCoords && hasRestCoords
       ? haversineKm(
-          restaurant.lat,
-          restaurant.lng,
+          restaurant!.lat!,
+          restaurant!.lng!,
           order.client_lat,
           order.client_lng,
         )
@@ -108,44 +111,50 @@ export default function OrderDetailScreen({ route, navigation }: Props) {
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Map preview */}
         <View style={styles.mapContainer}>
-          <MapView
-            provider={PROVIDER_GOOGLE}
-            style={styles.map}
-            initialRegion={{
-              latitude: order.client_lat,
-              longitude: order.client_lng,
-              latitudeDelta: 0.01,
-              longitudeDelta: 0.01,
-            }}
-            scrollEnabled={false}
-            zoomEnabled={false}
-          >
-            <Marker
-              coordinate={{
+          {hasClientCoords ? (
+            <MapView
+              style={styles.map}
+              initialRegion={{
                 latitude: order.client_lat,
                 longitude: order.client_lng,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
               }}
-              title="Cliente"
+              scrollEnabled={false}
+              zoomEnabled={false}
             >
-              <View style={styles.markerClient}>
-                <Ionicons name="home" size={16} color={colors.white} />
-              </View>
-            </Marker>
-
-            {restaurant?.lat && restaurant?.lng && (
               <Marker
                 coordinate={{
-                  latitude: restaurant.lat,
-                  longitude: restaurant.lng,
+                  latitude: order.client_lat,
+                  longitude: order.client_lng,
                 }}
-                title="Restaurante"
+                title="Cliente"
               >
-                <View style={styles.markerRestaurant}>
-                  <Ionicons name="restaurant" size={16} color={colors.white} />
+                <View style={styles.markerClient}>
+                  <Ionicons name="home" size={16} color={colors.white} />
                 </View>
               </Marker>
-            )}
-          </MapView>
+
+              {hasRestCoords && (
+                <Marker
+                  coordinate={{
+                    latitude: restaurant!.lat!,
+                    longitude: restaurant!.lng!,
+                  }}
+                  title="Restaurante"
+                >
+                  <View style={styles.markerRestaurant}>
+                    <Ionicons name="restaurant" size={16} color={colors.white} />
+                  </View>
+                </Marker>
+              )}
+            </MapView>
+          ) : (
+            <View style={[styles.map, { backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }]}>
+              <Ionicons name="location-outline" size={32} color={colors.textMuted} />
+              <Text style={{ color: colors.textMuted, marginTop: 4, fontSize: 13 }}>Sin ubicación GPS</Text>
+            </View>
+          )}
 
           {/* Overlay distance badge */}
           {distance !== null && (
@@ -233,33 +242,36 @@ export default function OrderDetailScreen({ route, navigation }: Props) {
           <Text style={styles.sectionTitle}>Productos</Text>
 
           <View style={styles.infoCard}>
-            {order.items.map((item, idx) => (
-              <View
-                key={item.id + idx}
-                style={[
-                  styles.itemRow,
-                  idx < order.items.length - 1 && styles.itemBorder,
-                ]}
-              >
-                <View style={styles.itemQty}>
-                  <Text style={styles.itemQtyText}>{item.quantity}x</Text>
+            {order.items.map((raw, idx) => {
+              const item = normalizeItem(raw);
+              return (
+                <View
+                  key={item.id + idx}
+                  style={[
+                    styles.itemRow,
+                    idx < order.items.length - 1 && styles.itemBorder,
+                  ]}
+                >
+                  <View style={styles.itemQty}>
+                    <Text style={styles.itemQtyText}>{item.quantity}x</Text>
+                  </View>
+                  <View style={styles.itemInfo}>
+                    <Text style={styles.itemName}>{item.name}</Text>
+                    {item.options?.map((opt, oi) => (
+                      <Text key={oi} style={styles.itemOption}>
+                        + {opt.label}
+                      </Text>
+                    ))}
+                    {item.notes ? (
+                      <Text style={styles.itemNotes}>"{item.notes}"</Text>
+                    ) : null}
+                  </View>
+                  <Text style={styles.itemPrice}>
+                    {formatPrice(item.price * item.quantity)}
+                  </Text>
                 </View>
-                <View style={styles.itemInfo}>
-                  <Text style={styles.itemName}>{item.name}</Text>
-                  {item.options?.map((opt, oi) => (
-                    <Text key={oi} style={styles.itemOption}>
-                      + {opt.label}
-                    </Text>
-                  ))}
-                  {item.notes ? (
-                    <Text style={styles.itemNotes}>"{item.notes}"</Text>
-                  ) : null}
-                </View>
-                <Text style={styles.itemPrice}>
-                  {formatPrice(item.price * item.quantity)}
-                </Text>
-              </View>
-            ))}
+              );
+            })}
 
             <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>Total</Text>

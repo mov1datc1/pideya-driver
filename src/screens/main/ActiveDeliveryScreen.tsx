@@ -12,13 +12,13 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker } from 'react-native-maps';
 import * as ordersService from '../../services/orders';
 import * as deliveryService from '../../services/delivery';
 import * as locationService from '../../services/location';
 import { useAuth } from '../../context/AuthContext';
 import { colors, spacing, radius } from '../../constants/theme';
-import { formatPrice } from '../../utils/formatters';
+import { formatPrice, isValidCoordinate } from '../../utils/formatters';
 import type { Order } from '../../types/database';
 import type { RootStackParamList } from '../../types/navigation';
 
@@ -76,34 +76,44 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
     let mounted = true;
 
     (async () => {
-      const granted = await locationService.requestLocationPermissions();
-      if (!granted) {
-        Alert.alert(
-          'Permisos',
-          'Se necesitan permisos de ubicación para compartir tu posición con el cliente.',
-        );
-        return;
-      }
-
-      locationService.setActiveOrderId(orderId);
-
-      // Get initial position
       try {
-        const loc = await locationService.getCurrentLocation();
-        if (mounted) {
-          setDriverCoords({
-            lat: loc.coords.latitude,
-            lng: loc.coords.longitude,
-          });
+        const granted = await locationService.requestLocationPermissions();
+        if (!granted) {
+          Alert.alert(
+            'Permisos',
+            'Se necesitan permisos de ubicación para compartir tu posición con el cliente.',
+          );
+          return;
         }
-      } catch {}
 
-      await locationService.startBackgroundTracking();
+        locationService.setActiveOrderId(orderId);
+
+        // Get initial position
+        try {
+          const loc = await locationService.getCurrentLocation();
+          if (mounted) {
+            setDriverCoords({
+              lat: loc.coords.latitude,
+              lng: loc.coords.longitude,
+            });
+          }
+        } catch (locErr) {
+          console.warn('Could not get initial location:', locErr);
+        }
+
+        try {
+          await locationService.startBackgroundTracking();
+        } catch (bgErr) {
+          console.warn('Could not start background tracking:', bgErr);
+        }
+      } catch (permErr) {
+        console.warn('Location permission error:', permErr);
+      }
     })();
 
     return () => {
       mounted = false;
-      locationService.stopBackgroundTracking();
+      locationService.stopBackgroundTracking().catch(() => {});
     };
   }, [orderId]);
 
@@ -142,16 +152,17 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
   // Fit map to markers
   useEffect(() => {
     if (!order || !driverCoords || !mapRef.current) return;
+    if (!isValidCoordinate(order.client_lat, order.client_lng)) return;
 
     const coords = [
       { latitude: order.client_lat, longitude: order.client_lng },
       { latitude: driverCoords.lat, longitude: driverCoords.lng },
     ];
 
-    if (restaurant?.lat && restaurant?.lng) {
+    if (isValidCoordinate(restaurant?.lat, restaurant?.lng)) {
       coords.push({
-        latitude: restaurant.lat,
-        longitude: restaurant.lng,
+        latitude: restaurant!.lat!,
+        longitude: restaurant!.lng!,
       });
     }
 
@@ -216,73 +227,86 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
     );
   }
 
+  const hasClientCoords = isValidCoordinate(order?.client_lat, order?.client_lng);
+
   return (
     <View style={styles.container}>
       {/* Full-screen map */}
-      <MapView
-        ref={mapRef}
-        provider={PROVIDER_GOOGLE}
-        style={styles.map}
-        initialRegion={{
-          latitude: order.client_lat,
-          longitude: order.client_lng,
-          latitudeDelta: 0.02,
-          longitudeDelta: 0.02,
-        }}
-      >
-        {/* Client marker */}
-        <Marker
-          coordinate={{
-            latitude: order.client_lat,
-            longitude: order.client_lng,
+      {hasClientCoords ? (
+        <MapView
+          ref={mapRef}
+          style={styles.map}
+          initialRegion={{
+            latitude: order!.client_lat,
+            longitude: order!.client_lng,
+            latitudeDelta: 0.02,
+            longitudeDelta: 0.02,
           }}
-          title={order.client_name || 'Cliente'}
-          description={order.client_location_note || undefined}
         >
-          <View style={styles.markerClient}>
-            <Ionicons name="home" size={18} color={colors.white} />
-          </View>
-        </Marker>
-
-        {/* Restaurant marker */}
-        {restaurant?.lat && restaurant?.lng && (
+          {/* Client marker */}
           <Marker
             coordinate={{
-              latitude: restaurant.lat,
-              longitude: restaurant.lng,
+              latitude: order!.client_lat,
+              longitude: order!.client_lng,
             }}
-            title={restaurant.name}
+            title={order!.client_name || 'Cliente'}
+            description={order!.client_location_note || undefined}
           >
-            <View style={styles.markerRestaurant}>
-              <Ionicons name="restaurant" size={16} color={colors.white} />
+            <View style={styles.markerClient}>
+              <Ionicons name="home" size={18} color={colors.white} />
             </View>
           </Marker>
-        )}
 
-        {/* Driver marker */}
-        {driverCoords && (
-          <Marker
-            coordinate={{
-              latitude: driverCoords.lat,
-              longitude: driverCoords.lng,
-            }}
-            title="Tu ubicación"
-            anchor={{ x: 0.5, y: 0.5 }}
-          >
-            <View style={styles.driverMarkerWrapper}>
-              <Animated.View
-                style={[
-                  styles.driverPulse,
-                  { transform: [{ scale: pulseAnim }] },
-                ]}
-              />
-              <View style={styles.driverDot}>
-                <Ionicons name="bicycle" size={18} color={colors.white} />
+          {/* Restaurant marker */}
+          {isValidCoordinate(restaurant?.lat, restaurant?.lng) && (
+            <Marker
+              coordinate={{
+                latitude: restaurant!.lat!,
+                longitude: restaurant!.lng!,
+              }}
+              title={restaurant!.name}
+            >
+              <View style={styles.markerRestaurant}>
+                <Ionicons name="restaurant" size={16} color={colors.white} />
               </View>
-            </View>
-          </Marker>
-        )}
-      </MapView>
+            </Marker>
+          )}
+
+          {/* Driver marker */}
+          {driverCoords && (
+            <Marker
+              coordinate={{
+                latitude: driverCoords.lat,
+                longitude: driverCoords.lng,
+              }}
+              title="Tu ubicación"
+              anchor={{ x: 0.5, y: 0.5 }}
+            >
+              <View style={styles.driverMarkerWrapper}>
+                <Animated.View
+                  style={[
+                    styles.driverPulse,
+                    { transform: [{ scale: pulseAnim }] },
+                  ]}
+                />
+                <View style={styles.driverDot}>
+                  <Ionicons name="bicycle" size={18} color={colors.white} />
+                </View>
+              </View>
+            </Marker>
+          )}
+        </MapView>
+      ) : (
+        <View style={[styles.map, { backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }]}>
+          <Ionicons name="location-outline" size={48} color={colors.textMuted} />
+          <Text style={{ color: colors.textMuted, marginTop: 8, fontSize: 15 }}>Sin ubicación del cliente</Text>
+          {driverCoords && (
+            <Text style={{ color: colors.textSecondary, marginTop: 4, fontSize: 13 }}>
+              Tu posición: {driverCoords.lat.toFixed(4)}, {driverCoords.lng.toFixed(4)}
+            </Text>
+          )}
+        </View>
+      )}
 
       {/* Status pill overlay */}
       <View style={styles.statusPill}>

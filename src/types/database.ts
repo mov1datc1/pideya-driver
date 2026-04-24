@@ -11,13 +11,32 @@ export type OrderStatus =
   | 'REJECTED'
   | 'CANCELLED';
 
+/**
+ * Order item as stored in JSONB. Two formats exist:
+ *
+ * Legacy (mobile):  { id, name, price, quantity, notes?, options? }
+ * Web (rancho_eats): { menu_item_id, name, unit_price, qty, subtotal, option_id?, option_label? }
+ *
+ * Use `normalizeItem()` from utils/formatters to get a consistent shape.
+ */
 export interface OrderItemJSON {
-  id: string;
+  // --- Common ---
   name: string;
-  price: number;
-  quantity: number;
+
+  // --- Legacy format ---
+  id?: string;
+  price?: number;
+  quantity?: number;
   notes?: string;
   options?: { label: string; price: number }[];
+
+  // --- Web format ---
+  menu_item_id?: string;
+  unit_price?: number;
+  qty?: number;
+  subtotal?: number;
+  option_id?: string | null;
+  option_label?: string | null;
 }
 
 export interface DriverProfile {
