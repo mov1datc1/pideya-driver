@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import MapView, { Marker } from 'react-native-maps';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as ordersService from '../../services/orders';
 import * as deliveryService from '../../services/delivery';
 import { useAuth } from '../../context/AuthContext';
@@ -113,6 +113,7 @@ export default function OrderDetailScreen({ route, navigation }: Props) {
         <View style={styles.mapContainer}>
           {hasClientCoords ? (
             <MapView
+              provider={PROVIDER_GOOGLE}
               style={styles.map}
               initialRegion={{
                 latitude: order.client_lat,
