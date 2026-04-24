@@ -20,7 +20,7 @@ export const takeOrder = async (orderId: string): Promise<void> => {
   const token = await getToken();
 
   const { error } = await supabase.rpc('driver_take_order', {
-    p_token: token,
+    p_access_token: token,
     p_order_id: orderId,
   });
 
@@ -57,7 +57,7 @@ export const updateDriverLocation = async (params: {
   const token = await getToken();
 
   const { error } = await supabase.rpc('driver_update_location', {
-    p_token: token,
+    p_access_token: token,
     p_order_id: params.orderId,
     p_lat: params.lat,
     p_lng: params.lng,

@@ -38,7 +38,13 @@ export default function TokenLoginScreen() {
       await loginWithToken(trimmed);
       // AuthContext handles navigation via needsPhoneVerify or isAuthenticated
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Token inválido');
+      const msg = err.message || 'Token inválido';
+      Alert.alert(
+        'No se pudo iniciar sesión',
+        msg.includes('inválido') || msg.includes('inactivo')
+          ? 'El token no es válido o el repartidor está inactivo. Verifica con tu restaurante.'
+          : msg,
+      );
     } finally {
       setLoading(false);
     }
@@ -64,7 +70,7 @@ export default function TokenLoginScreen() {
       <View style={styles.card}>
         <Text style={styles.label}>Token de acceso</Text>
         <Text style={styles.hint}>
-          Ingresa el token que te compartió tu restaurante
+          Pega el enlace completo o solo el token que te compartió tu restaurante
         </Text>
 
         <View style={styles.inputRow}>
@@ -77,12 +83,13 @@ export default function TokenLoginScreen() {
             style={styles.input}
             value={token}
             onChangeText={setToken}
-            placeholder="Pega tu token aquí"
+            placeholder="URL o token de acceso"
             placeholderTextColor={colors.textMuted}
             autoCapitalize="none"
             autoCorrect={false}
             autoComplete="off"
             editable={!loading}
+            multiline={false}
           />
         </View>
 
@@ -105,8 +112,8 @@ export default function TokenLoginScreen() {
         <View style={styles.infoBox}>
           <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
           <Text style={styles.infoText}>
-            Tu restaurante te envía el token por WhatsApp cuando te registra
-            como repartidor.
+            Tu restaurante te envía un enlace por WhatsApp cuando te registra
+            como repartidor. Puedes pegar el enlace completo o solo el código.
           </Text>
         </View>
       </View>

@@ -1,4 +1,4 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+# EAS Build ignore file — includes .env for build
 
 # dependencies
 node_modules/
@@ -30,9 +30,7 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# env
-.env
-.env.local
+# NOTE: .env is NOT ignored for EAS builds
 .env*.local
 
 # typescript
@@ -41,6 +39,3 @@ yarn-error.*
 # generated native folders
 /ios
 /android
-
-# Credentials (never commit)
-.credentials.md

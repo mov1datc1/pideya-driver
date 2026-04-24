@@ -10,7 +10,7 @@ module.exports = {
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
-    newArchEnabled: true,
+    newArchEnabled: false,
     splash: {
       image: './assets/splash-icon.png',
       resizeMode: 'contain',
@@ -77,8 +77,9 @@ module.exports = {
     },
     extra: {
       eas: {
-        projectId: '', // Set after running eas init
+        projectId: '886e6c3a-fc23-4887-ad1b-28dc1f0c050b',
       },
     },
+    owner: 'pideya1',
   },
 };

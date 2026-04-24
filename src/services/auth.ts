@@ -5,6 +5,31 @@ import type { DriverProfile, Restaurant } from '../types/database';
 const DRIVER_TOKEN_KEY = '@pideya_driver_token';
 const DRIVER_PROFILE_KEY = '@pideya_driver_profile';
 
+/**
+ * Extracts the raw access_token from user input.
+ * Handles both:
+ *   - Raw token: "77badbc573920b2c7ecc79a92af618ae4fa1"
+ *   - Full URL:  "https://rancho-eats.vercel.app/repartidor?token=77badbc573920b2c7ecc79a92af618ae4fa1"
+ */
+const extractTokenFromInput = (input: string): string => {
+  const trimmed = input.trim();
+  // If it looks like a URL, try to extract the token query param
+  if (trimmed.includes('://') || trimmed.includes('?token=')) {
+    try {
+      // Handle URLs with or without protocol
+      const urlStr = trimmed.startsWith('http') ? trimmed : `https://${trimmed}`;
+      const url = new URL(urlStr);
+      const tokenParam = url.searchParams.get('token');
+      if (tokenParam) return tokenParam.trim();
+    } catch {
+      // URL parsing failed, try regex fallback
+      const match = trimmed.match(/[?&]token=([^&#\s]+)/);
+      if (match?.[1]) return match[1].trim();
+    }
+  }
+  return trimmed;
+};
+
 // ── Token-based auth (existing system) ──────────────────────
 
 export interface DriverSessionResult {
@@ -17,10 +42,13 @@ export interface DriverSessionResult {
  * Retorna el perfil del repartidor y su restaurante.
  */
 export const loginWithToken = async (
-  token: string,
+  rawInput: string,
 ): Promise<DriverSessionResult> => {
+  const token = extractTokenFromInput(rawInput);
+  if (!token) throw new Error('No se encontró un token válido en el texto ingresado.');
+
   const { data, error } = await supabase.rpc('driver_get_session', {
-    p_token: token,
+    p_access_token: token,
   });
 
   if (error) throw new Error(error.message);
@@ -38,9 +66,9 @@ export const loginWithToken = async (
     phone: row.driver_phone,
     vehicle_label: row.vehicle_label ?? null,
     notes: null,
-    is_active: true,
+    is_active: row.is_active ?? true,
     push_token: row.push_token ?? null,
-    last_location_at: null,
+    last_location_at: row.last_location_at ?? null,
     created_at: '',
     updated_at: '',
   };
@@ -55,7 +83,7 @@ export const loginWithToken = async (
     logo_url: row.restaurant_logo ?? null,
   };
 
-  // Persist token and profile locally
+  // Persist the clean token (not the full URL)
   await AsyncStorage.setItem(DRIVER_TOKEN_KEY, token);
   await AsyncStorage.setItem(
     DRIVER_PROFILE_KEY,
