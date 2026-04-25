@@ -7,6 +7,7 @@ import {
   StyleSheet,
   RefreshControl,
   ActivityIndicator,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -14,7 +15,12 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../../context/AuthContext';
 import * as ordersService from '../../services/orders';
 import { colors, spacing, radius } from '../../constants/theme';
-import { timeAgo, formatPrice, statusLabel, normalizeItem } from '../../utils/formatters';
+import {
+  timeAgo,
+  formatPrice,
+  statusLabel,
+  normalizeItem,
+} from '../../utils/formatters';
 import type { Order } from '../../types/database';
 import type { RootStackParamList } from '../../types/navigation';
 
@@ -26,6 +32,9 @@ export default function DashboardScreen() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Active delivery banner animation
+  const bannerAnim = React.useRef(new Animated.Value(0)).current;
 
   const fetchOrders = useCallback(async () => {
     if (!driver) return;
@@ -77,6 +86,30 @@ export default function DashboardScreen() {
     return unsub;
   }, [driver]);
 
+  // Active delivery detection
+  const activeDelivery = orders.find((o) => o.status === 'ON_THE_WAY');
+  const queuedOrders = orders.filter((o) => o.status === 'ACCEPTED');
+
+  // Banner animation
+  useEffect(() => {
+    if (activeDelivery) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(bannerAnim, {
+            toValue: 1,
+            duration: 1500,
+            useNativeDriver: false,
+          }),
+          Animated.timing(bannerAnim, {
+            toValue: 0,
+            duration: 1500,
+            useNativeDriver: false,
+          }),
+        ]),
+      ).start();
+    }
+  }, [activeDelivery, bannerAnim]);
+
   const onRefresh = () => {
     setRefreshing(true);
     fetchOrders();
@@ -88,87 +121,138 @@ export default function DashboardScreen() {
     return colors.statusPending;
   };
 
-  const renderOrder = ({ item }: { item: Order }) => (
-    <TouchableOpacity
-      style={styles.orderCard}
-      activeOpacity={0.7}
-      onPress={() => {
-        if (item.status === 'ON_THE_WAY') {
-          navigation.navigate('ActiveDelivery', { orderId: item.id });
-        } else {
-          navigation.navigate('OrderDetail', { orderId: item.id });
-        }
-      }}
-    >
-      {/* Status badge */}
-      <View style={styles.orderHeader}>
-        <View style={styles.orderNumberRow}>
-          <Text style={styles.orderNumber}>#{item.order_number}</Text>
-          <Text style={styles.orderTime}>{timeAgo(item.created_at)}</Text>
-        </View>
-        <View
-          style={[
-            styles.statusBadge,
-            { backgroundColor: statusColor(item.status) + '18' },
-          ]}
-        >
+  const handleOrderPress = (item: Order) => {
+    if (item.status === 'ON_THE_WAY') {
+      navigation.navigate('ActiveDelivery', { orderId: item.id });
+    } else if (item.status === 'ACCEPTED') {
+      navigation.navigate('OrderDetail', { orderId: item.id });
+    }
+  };
+
+  const renderOrder = ({ item }: { item: Order }) => {
+    const isQueued = activeDelivery && item.status === 'ACCEPTED';
+
+    return (
+      <TouchableOpacity
+        style={[styles.orderCard, isQueued && styles.orderCardQueued]}
+        activeOpacity={0.7}
+        onPress={() => handleOrderPress(item)}
+      >
+        {/* Status badge */}
+        <View style={styles.orderHeader}>
+          <View style={styles.orderNumberRow}>
+            <View>
+              <Text style={styles.orderRefCode}>
+                {item.reference_code}
+              </Text>
+              <Text style={styles.orderNumberSub}>
+                #{item.order_number} · {timeAgo(item.created_at)}
+              </Text>
+            </View>
+          </View>
           <View
             style={[
-              styles.statusDot,
-              { backgroundColor: statusColor(item.status) },
+              styles.statusBadge,
+              { backgroundColor: statusColor(item.status) + '18' },
             ]}
-          />
-          <Text
-            style={[styles.statusText, { color: statusColor(item.status) }]}
           >
-            {statusLabel(item.status)}
-          </Text>
+            <View
+              style={[
+                styles.statusDot,
+                { backgroundColor: statusColor(item.status) },
+              ]}
+            />
+            <Text
+              style={[
+                styles.statusText,
+                { color: statusColor(item.status) },
+              ]}
+            >
+              {statusLabel(item.status)}
+            </Text>
+          </View>
         </View>
-      </View>
 
-      {/* Client info */}
-      <View style={styles.clientRow}>
-        <Ionicons name="person-outline" size={16} color={colors.textSecondary} />
-        <Text style={styles.clientName}>{item.client_name || 'Cliente'}</Text>
-      </View>
-
-      {item.client_location_note && (
+        {/* Client info */}
         <View style={styles.clientRow}>
           <Ionicons
-            name="location-outline"
+            name="person-outline"
             size={16}
             color={colors.textSecondary}
           />
-          <Text style={styles.noteText} numberOfLines={1}>
-            {item.client_location_note}
+          <Text style={styles.clientName}>
+            {item.client_name || 'Cliente'}
           </Text>
+          {item.client_phone && (
+            <Text style={styles.clientPhone}>
+              📱 {item.client_phone}
+            </Text>
+          )}
         </View>
-      )}
 
-      {/* Items summary */}
-      <View style={styles.itemsSummary}>
-        <Text style={styles.itemsText}>
-          {item.items.reduce((sum, i) => sum + (normalizeItem(i).quantity), 0)} producto
-          {item.items.reduce((sum, i) => sum + (normalizeItem(i).quantity), 0) !== 1 ? 's' : ''}
-        </Text>
-        <Text style={styles.totalText}>{formatPrice(item.total)}</Text>
-      </View>
+        {item.client_location_note && (
+          <View style={styles.clientRow}>
+            <Ionicons
+              name="location-outline"
+              size={16}
+              color={colors.textSecondary}
+            />
+            <Text style={styles.noteText} numberOfLines={1}>
+              {item.client_location_note}
+            </Text>
+          </View>
+        )}
 
-      {/* CTA */}
-      <View style={styles.ctaRow}>
-        <Text style={styles.ctaText}>
-          {item.status === 'ON_THE_WAY'
-            ? 'Ver entrega activa'
-            : 'Ver detalle'}
-        </Text>
-        <Ionicons
-          name="chevron-forward"
-          size={18}
-          color={colors.primary}
-        />
-      </View>
-    </TouchableOpacity>
-  );
+        {/* Items summary */}
+        <View style={styles.itemsSummary}>
+          <Text style={styles.itemsText}>
+            {item.items.reduce(
+              (sum, i) => sum + normalizeItem(i).quantity,
+              0,
+            )}{' '}
+            producto
+            {item.items.reduce(
+              (sum, i) => sum + normalizeItem(i).quantity,
+              0,
+            ) !== 1
+              ? 's'
+              : ''}
+          </Text>
+          <Text style={styles.totalText}>{formatPrice(item.total)}</Text>
+        </View>
+
+        {/* CTA */}
+        <View style={styles.ctaRow}>
+          {isQueued ? (
+            <View style={styles.queuedLabel}>
+              <Ionicons name="time-outline" size={14} color="#E07C24" />
+              <Text style={styles.queuedText}>En cola — termina tu entrega actual</Text>
+            </View>
+          ) : (
+            <>
+              <Text style={styles.ctaText}>
+                {item.status === 'ON_THE_WAY'
+                  ? 'Ver entrega activa'
+                  : 'Ver detalle'}
+              </Text>
+              <Ionicons
+                name="chevron-forward"
+                size={18}
+                color={colors.primary}
+              />
+            </>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  // Sort: ON_THE_WAY first, then ACCEPTED
+  const sortedOrders = [...orders].sort((a, b) => {
+    if (a.status === 'ON_THE_WAY' && b.status !== 'ON_THE_WAY') return -1;
+    if (b.status === 'ON_THE_WAY' && a.status !== 'ON_THE_WAY') return 1;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
 
   if (loading) {
     return (
@@ -186,9 +270,7 @@ export default function DashboardScreen() {
           <Text style={styles.greeting}>
             Hola, {driver?.name?.split(' ')[0]}
           </Text>
-          <Text style={styles.restaurantName}>
-            {restaurant?.name}
-          </Text>
+          <Text style={styles.restaurantName}>{restaurant?.name}</Text>
         </View>
         <View style={styles.orderCountBadge}>
           <Text style={styles.orderCountText}>{orders.length}</Text>
@@ -196,10 +278,68 @@ export default function DashboardScreen() {
         </View>
       </View>
 
+      {/* Active delivery banner */}
+      {activeDelivery && (
+        <TouchableOpacity
+          style={styles.activeBanner}
+          activeOpacity={0.85}
+          onPress={() =>
+            navigation.navigate('ActiveDelivery', {
+              orderId: activeDelivery.id,
+            })
+          }
+        >
+          <Animated.View
+            style={[
+              styles.activeBannerPulse,
+              {
+                opacity: bannerAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.6, 1],
+                }),
+              },
+            ]}
+          />
+          <View style={styles.activeBannerContent}>
+            <Ionicons name="bicycle" size={24} color={colors.white} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.activeBannerTitle}>
+                🛵 {activeDelivery.reference_code} en camino
+              </Text>
+              <Text style={styles.activeBannerSub}>
+                {activeDelivery.client_name || 'Cliente'} ·{' '}
+                {formatPrice(activeDelivery.total)}
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={24}
+              color={colors.white}
+            />
+          </View>
+        </TouchableOpacity>
+      )}
+
+      {/* Queue info */}
+      {activeDelivery && queuedOrders.length > 0 && (
+        <View style={styles.queueInfo}>
+          <Ionicons name="layers-outline" size={16} color="#E07C24" />
+          <Text style={styles.queueInfoText}>
+            {queuedOrders.length} pedido
+            {queuedOrders.length > 1 ? 's' : ''} en cola — se habilitarán
+            al terminar la entrega actual
+          </Text>
+        </View>
+      )}
+
       {orders.length === 0 ? (
         <View style={styles.emptyContainer}>
           <View style={styles.emptyIcon}>
-            <Ionicons name="bicycle-outline" size={64} color={colors.primaryLight} />
+            <Ionicons
+              name="bicycle-outline"
+              size={64}
+              color={colors.primaryLight}
+            />
           </View>
           <Text style={styles.emptyTitle}>Sin pedidos asignados</Text>
           <Text style={styles.emptyText}>
@@ -216,7 +356,7 @@ export default function DashboardScreen() {
         </View>
       ) : (
         <FlatList
-          data={orders}
+          data={sortedOrders}
           keyExtractor={(o) => o.id}
           renderItem={renderOrder}
           contentContainerStyle={styles.list}
@@ -281,6 +421,57 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: 'rgba(255,255,255,0.8)',
   },
+
+  // Active delivery banner
+  activeBanner: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.md,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    backgroundColor: colors.statusOnTheWay,
+  },
+  activeBannerPulse: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.statusOnTheWay,
+  },
+  activeBannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
+  },
+  activeBannerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.white,
+  },
+  activeBannerSub: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.85)',
+    marginTop: 1,
+  },
+
+  // Queue info
+  queueInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    backgroundColor: '#FFF3E0',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+  },
+  queueInfoText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#E07C24',
+    fontWeight: '500',
+  },
+
+  // Order list
   list: {
     padding: spacing.md,
     gap: spacing.md,
@@ -295,6 +486,11 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 2,
   },
+  orderCardQueued: {
+    opacity: 0.7,
+    borderWidth: 1,
+    borderColor: '#E07C24' + '40',
+  },
   orderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -306,14 +502,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
-  orderNumber: {
-    fontSize: 18,
+  orderRefCode: {
+    fontSize: 17,
     fontWeight: '700',
     color: colors.textPrimary,
   },
-  orderTime: {
+  orderNumberSub: {
     fontSize: 12,
     color: colors.textMuted,
+    marginTop: 1,
   },
   statusBadge: {
     flexDirection: 'row',
@@ -341,6 +538,11 @@ const styles = StyleSheet.create({
   clientName: {
     fontSize: 15,
     color: colors.textPrimary,
+    fontWeight: '500',
+  },
+  clientPhone: {
+    fontSize: 12,
+    color: colors.primary,
     fontWeight: '500',
   },
   noteText: {
@@ -378,6 +580,19 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: '600',
   },
+
+  // Queued label
+  queuedLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  queuedText: {
+    fontSize: 12,
+    color: '#E07C24',
+    fontWeight: '500',
+  },
+
   // Empty state
   emptyContainer: {
     flex: 1,

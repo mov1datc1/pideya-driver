@@ -69,6 +69,7 @@ export interface DriverLocation {
 export interface Order {
   id: string;
   order_number: number;
+  reference_code: string; // PY-XXXXXX
   restaurant_id: string;
   client_name: string | null;
   client_phone: string | null;

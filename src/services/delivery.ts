@@ -28,15 +28,59 @@ export const takeOrder = async (orderId: string): Promise<void> => {
 };
 
 /**
- * Marcar pedido como entregado.
+ * Upload delivery proof photo to Supabase Storage.
+ * Returns the public URL of the uploaded image.
  */
-export const completeDelivery = async (orderId: string): Promise<void> => {
+export const uploadDeliveryPhoto = async (
+  orderId: string,
+  photoUri: string,
+): Promise<string> => {
+  // Read the file as blob
+  const response = await fetch(photoUri);
+  const blob = await response.blob();
+
+  const fileName = `${orderId}_${Date.now()}.jpg`;
+  const filePath = `deliveries/${fileName}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('delivery-photos')
+    .upload(filePath, blob, {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
+
+  if (uploadError) {
+    console.warn('Upload error:', uploadError.message);
+    // Don't block delivery if photo upload fails
+    return '';
+  }
+
+  const { data: urlData } = supabase.storage
+    .from('delivery-photos')
+    .getPublicUrl(filePath);
+
+  return urlData?.publicUrl || '';
+};
+
+/**
+ * Marcar pedido como entregado, con foto opcional.
+ */
+export const completeDelivery = async (
+  orderId: string,
+  photoUrl?: string,
+): Promise<void> => {
+  const updateData: Record<string, unknown> = {
+    status: 'DELIVERED',
+    delivered_at: new Date().toISOString(),
+  };
+
+  if (photoUrl) {
+    updateData.delivery_photo_url = photoUrl;
+  }
+
   const { error } = await supabase
     .from('orders')
-    .update({
-      status: 'DELIVERED',
-      delivered_at: new Date().toISOString(),
-    })
+    .update(updateData)
     .eq('id', orderId);
 
   if (error) throw new Error(error.message);
