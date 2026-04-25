@@ -20,14 +20,17 @@ module.exports = {
       [
         'expo-location',
         {
-          locationAlwaysAndWhenInUsePermission:
-            'Pide ya necesita tu ubicación para compartirla con el cliente durante la entrega.',
-          locationAlwaysPermission:
-            'Pide ya necesita tu ubicación en segundo plano para el seguimiento de entregas.',
           locationWhenInUsePermission:
             'Pide ya necesita tu ubicación para mostrar tu posición en el mapa.',
-          isAndroidBackgroundLocationEnabled: true,
-          isAndroidForegroundServiceEnabled: true,
+          isAndroidBackgroundLocationEnabled: false,
+          isAndroidForegroundServiceEnabled: false,
+        },
+      ],
+      [
+        'expo-image-picker',
+        {
+          photosPermission: 'Pide ya usa fotos para evidencia de entrega.',
+          cameraPermission: 'Pide ya usa la cámara para tomar foto de entrega.',
         },
       ],
       [
@@ -68,10 +71,7 @@ module.exports = {
       permissions: [
         'ACCESS_FINE_LOCATION',
         'ACCESS_COARSE_LOCATION',
-        'ACCESS_BACKGROUND_LOCATION',
-        'FOREGROUND_SERVICE',
-        'FOREGROUND_SERVICE_LOCATION',
-        'RECEIVE_BOOT_COMPLETED',
+        'CAMERA',
         'VIBRATE',
       ],
     },

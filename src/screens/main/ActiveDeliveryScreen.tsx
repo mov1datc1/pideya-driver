@@ -12,7 +12,7 @@ import {
   Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+// ImagePicker loaded lazily to avoid native crashes on old devices
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as ordersService from '../../services/orders';
 import * as deliveryService from '../../services/delivery';
@@ -133,6 +133,7 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
   /** Take delivery proof photo */
   const takeDeliveryPhoto = async () => {
     try {
+      const ImagePicker = require('expo-image-picker');
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permisos', 'Se necesitan permisos de cámara para la foto de evidencia.');
@@ -149,6 +150,7 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
       }
     } catch (err) {
       console.warn('Camera error:', err);
+      Alert.alert('Cámara no disponible', 'No se pudo abrir la cámara en este dispositivo.');
     }
   };
 
