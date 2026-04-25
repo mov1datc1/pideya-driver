@@ -17,7 +17,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as ordersService from '../../services/orders';
 import * as deliveryService from '../../services/delivery';
 import * as locationService from '../../services/location';
-import { useAuth } from '../../context/AuthContext';
+import { supabase } from '../../services/supabase';
 import { colors, spacing, radius } from '../../constants/theme';
 import {
   formatPrice,
@@ -33,7 +33,6 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ActiveDelivery'>;
 
 export default function ActiveDeliveryScreen({ route, navigation }: Props) {
   const { orderId } = route.params;
-  const { restaurant } = useAuth();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [completing, setCompleting] = useState(false);
@@ -116,19 +115,37 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
     };
   }, [orderId]);
 
-  // Real-time order updates
+  // Real-time order updates — unique channel name to avoid collision with DashboardScreen
   useEffect(() => {
     if (!order?.delivery_driver_id) return;
-    const unsub = ordersService.subscribeToDriverOrders(
-      order.delivery_driver_id,
-      (updated) => {
-        if (updated.id === orderId) {
-          setOrder(updated);
-        }
-      },
-    );
-    return unsub;
-  }, [orderId, order?.delivery_driver_id]);
+
+    let channel: any = null;
+    try {
+      channel = supabase
+        .channel(`active-delivery-${orderId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'orders',
+            filter: `id=eq.${orderId}`,
+          },
+          (payload: any) => {
+            setOrder(payload.new as Order);
+          },
+        )
+        .subscribe();
+    } catch (err) {
+      console.warn('Realtime subscription error:', err);
+    }
+
+    return () => {
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch {}
+      }
+    };
+  }, [orderId]);
 
   /** Take delivery proof photo */
   const takeDeliveryPhoto = async () => {
