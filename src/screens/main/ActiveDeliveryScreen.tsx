@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -31,59 +31,45 @@ import type { RootStackParamList } from '../../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ActiveDelivery'>;
 
-// Try importing MapView — may crash on some devices
-let MapView: any = null;
-let Marker: any = null;
-let PROVIDER_GOOGLE: any = undefined;
-try {
-  const maps = require('react-native-maps');
-  MapView = maps.default;
-  Marker = maps.Marker;
-  PROVIDER_GOOGLE = maps.PROVIDER_GOOGLE;
-} catch {
-  // Maps not available — will use fallback
-}
-
 export default function ActiveDeliveryScreen({ route, navigation }: Props) {
   const { orderId } = route.params;
   const { restaurant } = useAuth();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [completing, setCompleting] = useState(false);
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [driverCoords, setDriverCoords] = useState<{
     lat: number;
     lng: number;
   } | null>(null);
-  const [mapError, setMapError] = useState(false);
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [gpsStatus, setGpsStatus] = useState<string>('Iniciando GPS...');
-
-  const mapRef = useRef<any>(null);
+  const [gpsStatus, setGpsStatus] = useState('Iniciando GPS...');
 
   // Fetch order
   useEffect(() => {
+    let mounted = true;
     (async () => {
       try {
         const data = await ordersService.getOrderById(orderId);
-        setOrder(data);
+        if (mounted) setOrder(data);
       } catch (err: any) {
         Alert.alert('Error', err.message);
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     })();
+    return () => { mounted = false; };
   }, [orderId]);
 
-  // Start GPS tracking — wrapped in robust try/catch
+  // Start simple foreground GPS tracking
   useEffect(() => {
     let mounted = true;
-    let interval: ReturnType<typeof setInterval> | null = null;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
 
     (async () => {
       try {
         const granted = await locationService.requestLocationPermissions();
         if (!granted) {
-          setGpsStatus('Sin permisos de ubicación');
+          if (mounted) setGpsStatus('Sin permisos de ubicación');
           return;
         }
 
@@ -93,36 +79,31 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
         try {
           const loc = await locationService.getCurrentLocation();
           if (mounted) {
-            setDriverCoords({
-              lat: loc.coords.latitude,
-              lng: loc.coords.longitude,
-            });
+            setDriverCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
             setGpsStatus('GPS activo');
           }
         } catch {
-          setGpsStatus('Esperando señal GPS...');
+          if (mounted) setGpsStatus('Esperando señal GPS...');
         }
 
-        // Try background tracking (may fail on some devices)
+        // Start foreground watch
         try {
-          await locationService.startBackgroundTracking();
+          await locationService.startForegroundTracking();
           if (mounted) setGpsStatus('GPS activo · Compartiendo ubicación');
         } catch {
-          if (mounted) setGpsStatus('GPS sin background — usando primer plano');
+          if (mounted) setGpsStatus('GPS en modo básico');
         }
 
-        // Periodic foreground updates every 8 seconds
-        interval = setInterval(async () => {
+        // Also poll every 10 seconds to update UI
+        intervalId = setInterval(async () => {
           try {
             const loc = await locationService.getCurrentLocation();
             if (mounted) {
-              setDriverCoords({
-                lat: loc.coords.latitude,
-                lng: loc.coords.longitude,
-              });
+              setDriverCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
             }
           } catch {}
-        }, 8_000);
+        }, 10_000);
+
       } catch {
         if (mounted) setGpsStatus('Error de GPS');
       }
@@ -130,67 +111,39 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
 
     return () => {
       mounted = false;
-      if (interval) clearInterval(interval);
-      locationService.stopBackgroundTracking().catch(() => {});
+      if (intervalId) clearInterval(intervalId);
+      locationService.stopTracking().catch(() => {});
     };
   }, [orderId]);
 
   // Real-time order updates
   useEffect(() => {
     if (!order?.delivery_driver_id) return;
-
     const unsub = ordersService.subscribeToDriverOrders(
       order.delivery_driver_id,
       (updated) => {
         if (updated.id === orderId) {
           setOrder(updated);
-          if (updated.status === 'DELIVERED') {
-            locationService.stopBackgroundTracking().catch(() => {});
-          }
         }
       },
     );
-
     return unsub;
   }, [orderId, order?.delivery_driver_id]);
 
-  // Fit map to markers when coords update
-  useEffect(() => {
-    if (!order || !driverCoords || !mapRef.current || mapError) return;
-    if (!isValidCoordinate(order.client_lat, order.client_lng)) return;
-
-    try {
-      const coords = [
-        { latitude: order.client_lat, longitude: order.client_lng },
-        { latitude: driverCoords.lat, longitude: driverCoords.lng },
-      ];
-
-      mapRef.current.fitToCoordinates(coords, {
-        edgePadding: { top: 80, right: 60, bottom: 300, left: 60 },
-        animated: true,
-      });
-    } catch {}
-  }, [order, driverCoords, mapError]);
-
-  /** Take a photo as delivery proof */
+  /** Take delivery proof photo */
   const takeDeliveryPhoto = async () => {
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert(
-          'Permisos de cámara',
-          'Se necesitan permisos de cámara para tomar la foto de evidencia.',
-        );
+        Alert.alert('Permisos', 'Se necesitan permisos de cámara para la foto de evidencia.');
         return;
       }
-
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ['images'],
         allowsEditing: false,
-        quality: 0.5, // Compress for faster upload
+        quality: 0.5,
         exif: false,
       });
-
       if (!result.canceled && result.assets[0]) {
         setPhotoUri(result.assets[0].uri);
       }
@@ -199,35 +152,29 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
     }
   };
 
+  /** Complete delivery */
   const handleComplete = () => {
     if (!order) return;
+    const msg = photoUri
+      ? `¿Confirmas la entrega del pedido ${order.reference_code || '#' + order.order_number}?`
+      : `¿Confirmas la entrega?\n\n⚠️ No tomaste foto de evidencia.`;
 
-    const confirmMessage = photoUri
-      ? `¿Confirmas la entrega del pedido ${order.reference_code}? La foto de evidencia se guardará.`
-      : `¿Confirmas la entrega del pedido ${order.reference_code}?\n\n⚠️ No tomaste foto de evidencia. ¿Continuar sin foto?`;
-
-    Alert.alert('Confirmar entrega', confirmMessage, [
+    Alert.alert('Confirmar entrega', msg, [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Sí, entregado',
-        style: 'default',
         onPress: async () => {
           setCompleting(true);
           try {
-            // Upload photo if taken
             let photoUrl = '';
             if (photoUri) {
-              photoUrl = await deliveryService.uploadDeliveryPhoto(
-                order.id,
-                photoUri,
-              );
+              photoUrl = await deliveryService.uploadDeliveryPhoto(order.id, photoUri);
             }
-
             await deliveryService.completeDelivery(order.id, photoUrl || undefined);
-            await locationService.stopBackgroundTracking().catch(() => {});
+            await locationService.stopTracking().catch(() => {});
             Alert.alert(
               '¡Entrega completada!',
-              `Pedido ${order.reference_code} entregado exitosamente.${photoUrl ? '\n📸 Foto guardada como evidencia.' : ''}`,
+              `Pedido ${order.reference_code || '#' + order.order_number} entregado.${photoUrl ? '\n📸 Foto guardada.' : ''}`,
               [{ text: 'OK', onPress: () => navigation.popToTop() }],
             );
           } catch (err: any) {
@@ -240,25 +187,19 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
     ]);
   };
 
-  /** Open Google Maps with turn-by-turn navigation */
+  /** Open Google Maps navigation */
   const openGoogleMaps = () => {
     if (!order) return;
+    const lat = order.client_lat;
+    const lng = order.client_lng;
     const url = Platform.select({
-      ios: `comgooglemaps://?daddr=${order.client_lat},${order.client_lng}&directionsmode=driving`,
-      android: `google.navigation:q=${order.client_lat},${order.client_lng}&mode=d`,
+      ios: `comgooglemaps://?daddr=${lat},${lng}&directionsmode=driving`,
+      android: `google.navigation:q=${lat},${lng}&mode=d`,
     });
-
-    // Try Google Maps first, fallback to generic maps
     if (url) {
-      Linking.canOpenURL(url).then((supported) => {
-        if (supported) {
-          Linking.openURL(url);
-        } else {
-          // Fallback to web
-          Linking.openURL(
-            `https://www.google.com/maps/dir/?api=1&destination=${order.client_lat},${order.client_lng}&travelmode=driving`,
-          );
-        }
+      Linking.canOpenURL(url).then((ok) => {
+        if (ok) Linking.openURL(url);
+        else Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
       });
     }
   };
@@ -266,15 +207,12 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
   /** Open Waze */
   const openWaze = () => {
     if (!order) return;
-    const url = `https://waze.com/ul?ll=${order.client_lat},${order.client_lng}&navigate=yes`;
-    Linking.openURL(url);
+    Linking.openURL(`https://waze.com/ul?ll=${order.client_lat},${order.client_lng}&navigate=yes`);
   };
 
   /** Call client */
   const callClient = () => {
-    if (order?.client_phone) {
-      Linking.openURL(`tel:${order.client_phone}`);
-    }
+    if (order?.client_phone) Linking.openURL(`tel:${order.client_phone}`);
   };
 
   /** WhatsApp client */
@@ -282,331 +220,189 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
     if (!order?.client_phone) return;
     const phone = order.client_phone.replace(/\D/g, '');
     const withCountry = phone.startsWith('52') ? phone : `52${phone}`;
-    const message = `Hola, soy tu repartidor de Pide ya 🛵. Voy en camino con tu pedido ${order.reference_code}. ¿Alguna indicación adicional?`;
-    Linking.openURL(
-      `https://wa.me/${withCountry}?text=${encodeURIComponent(message)}`,
-    );
+    const ref = order.reference_code || `#${order.order_number}`;
+    const msg = `Hola, soy tu repartidor de Pide ya 🛵. Voy en camino con tu pedido ${ref}. ¿Alguna indicación adicional?`;
+    Linking.openURL(`https://wa.me/${withCountry}?text=${encodeURIComponent(msg)}`);
   };
 
   if (loading || !order) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={{ color: colors.textMuted, marginTop: 12 }}>
-          Cargando pedido...
-        </Text>
+        <Text style={{ color: colors.textMuted, marginTop: 12 }}>Cargando pedido...</Text>
       </View>
     );
   }
 
   const hasClientCoords = isValidCoordinate(order.client_lat, order.client_lng);
-  const distanceKm =
-    driverCoords && hasClientCoords
-      ? haversineKm(
-          driverCoords.lat,
-          driverCoords.lng,
-          order.client_lat,
-          order.client_lng,
-        )
-      : null;
-
-  // Estimated time based on distance (rough: 25 km/h for moto in city)
+  const distanceKm = driverCoords && hasClientCoords
+    ? haversineKm(driverCoords.lat, driverCoords.lng, order.client_lat, order.client_lng)
+    : null;
   const etaMinutes = distanceKm ? Math.max(1, Math.round((distanceKm / 25) * 60)) : null;
-
   const isDelivered = order.status === 'DELIVERED';
+  const refCode = order.reference_code || `#${order.order_number}`;
 
   return (
     <View style={styles.container}>
-      {/* Map section — with crash protection */}
-      <View style={styles.mapSection}>
-        {hasClientCoords && MapView && !mapError ? (
-          <MapView
-            ref={mapRef}
-            provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
-            style={StyleSheet.absoluteFillObject}
-            initialRegion={{
-              latitude: order.client_lat,
-              longitude: order.client_lng,
-              latitudeDelta: 0.02,
-              longitudeDelta: 0.02,
-            }}
-            showsUserLocation={true}
-            showsMyLocationButton={false}
-            onMapReady={() => setMapError(false)}
-            onError={() => setMapError(true)}
-          >
-            {/* Client destination marker */}
-            <Marker
-              coordinate={{
-                latitude: order.client_lat,
-                longitude: order.client_lng,
-              }}
-              title={order.client_name || 'Cliente'}
-              description={order.client_location_note || undefined}
-            >
-              <View style={styles.markerClient}>
-                <Ionicons name="home" size={18} color={colors.white} />
-              </View>
-            </Marker>
-
-            {/* Restaurant marker */}
-            {isValidCoordinate(restaurant?.lat, restaurant?.lng) && (
-              <Marker
-                coordinate={{
-                  latitude: restaurant!.lat!,
-                  longitude: restaurant!.lng!,
-                }}
-                title={restaurant!.name}
-              >
-                <View style={styles.markerRestaurant}>
-                  <Ionicons
-                    name="restaurant"
-                    size={14}
-                    color={colors.white}
-                  />
-                </View>
-              </Marker>
-            )}
-          </MapView>
-        ) : (
-          <View style={styles.mapFallback}>
-            <Ionicons name="map-outline" size={48} color={colors.textMuted} />
-            <Text style={styles.mapFallbackText}>
-              {mapError ? 'Error al cargar mapa' : 'Mapa no disponible'}
-            </Text>
-            <Text style={styles.mapFallbackHint}>
-              Usa Google Maps para navegar
-            </Text>
-          </View>
-        )}
-
-        {/* Status pill overlay */}
-        <View style={styles.statusPill}>
-          <View
-            style={[
-              styles.statusDot,
-              {
-                backgroundColor: isDelivered
-                  ? colors.success
-                  : colors.statusOnTheWay,
-              },
-            ]}
-          />
-          <Text style={styles.statusPillText}>
-            {isDelivered
-              ? '✅ Entregado'
-              : `En camino — ${order.reference_code}`}
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backArrow}>
+          <Ionicons name="arrow-back" size={24} color={colors.white} />
+        </TouchableOpacity>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerTitle}>
+            {isDelivered ? '✅ Entregado' : '🛵 Entrega en curso'}
           </Text>
-          {etaMinutes && !isDelivered && (
-            <View style={styles.etaBadge}>
-              <Text style={styles.etaText}>~{etaMinutes} min</Text>
-            </View>
-          )}
+          <Text style={styles.headerSub}>{refCode}</Text>
         </View>
-
-        {/* Distance badge */}
-        {distanceKm !== null && !isDelivered && (
-          <View style={styles.distanceBadge}>
-            <Ionicons
-              name="navigate-outline"
-              size={14}
-              color={colors.primary}
-            />
-            <Text style={styles.distanceText}>
-              {formatDistance(distanceKm)}
-            </Text>
+        {etaMinutes && !isDelivered && (
+          <View style={styles.etaBadge}>
+            <Text style={styles.etaText}>~{etaMinutes} min</Text>
           </View>
         )}
       </View>
 
-      {/* Bottom card — scrollable */}
-      <ScrollView
-        style={styles.bottomCard}
-        showsVerticalScrollIndicator={false}
-        bounces={false}
-      >
-        {/* GPS status */}
-        <View style={styles.gpsRow}>
-          <Ionicons
-            name="radio-outline"
-            size={14}
-            color={
-              gpsStatus.includes('activo')
-                ? colors.success
-                : colors.textMuted
-            }
-          />
-          <Text
-            style={[
-              styles.gpsText,
-              gpsStatus.includes('activo') && { color: colors.success },
-            ]}
-          >
-            {gpsStatus}
-          </Text>
-        </View>
-
-        {/* Client info card */}
-        <View style={styles.clientCard}>
-          <View style={styles.clientAvatar}>
-            <Ionicons name="person" size={20} color={colors.white} />
-          </View>
-          <View style={styles.clientDetails}>
-            <Text style={styles.clientName}>
-              {order.client_name || 'Cliente'}
+      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} bounces={false}>
+        {/* GPS + Distance info */}
+        <View style={styles.infoBar}>
+          <View style={styles.infoItem}>
+            <Ionicons
+              name="radio-outline"
+              size={16}
+              color={gpsStatus.includes('activo') ? colors.success : colors.textMuted}
+            />
+            <Text style={[styles.infoItemText, gpsStatus.includes('activo') && { color: colors.success }]}>
+              {gpsStatus}
             </Text>
-            {order.client_location_note && (
-              <Text style={styles.clientNote} numberOfLines={2}>
-                📍 {order.client_location_note}
-              </Text>
-            )}
-            {order.client_phone && (
-              <Text style={styles.clientPhone}>
-                📱 {order.client_phone}
-              </Text>
-            )}
           </View>
-          <Text style={styles.totalText}>{formatPrice(order.total)}</Text>
-        </View>
-
-        {/* === NAVIGATION BUTTONS — Primary CTA === */}
-        <View style={styles.navButtons}>
-          <TouchableOpacity
-            style={styles.googleMapsBtn}
-            onPress={openGoogleMaps}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="navigate" size={22} color={colors.white} />
-            <Text style={styles.googleMapsBtnText}>
-              Ir con Google Maps
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.wazeBtn}
-            onPress={openWaze}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="compass" size={20} color={colors.primary} />
-            <Text style={styles.wazeBtnText}>Waze</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Contact buttons */}
-        <View style={styles.contactButtons}>
-          {order.client_phone && (
-            <>
-              <TouchableOpacity
-                style={styles.contactBtn}
-                onPress={whatsappClient}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="logo-whatsapp" size={22} color="#25D366" />
-                <Text style={[styles.contactBtnText, { color: '#25D366' }]}>
-                  WhatsApp
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.contactBtn}
-                onPress={callClient}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="call" size={22} color={colors.primary} />
-                <Text style={styles.contactBtnText}>Llamar</Text>
-              </TouchableOpacity>
-            </>
+          {distanceKm !== null && (
+            <View style={styles.infoItem}>
+              <Ionicons name="navigate-outline" size={16} color={colors.primary} />
+              <Text style={[styles.infoItemText, { color: colors.primary, fontWeight: '700' }]}>
+                {formatDistance(distanceKm)}
+              </Text>
+            </View>
           )}
         </View>
 
-        {/* Items summary (collapsible feel) */}
-        <View style={styles.itemsSummary}>
-          <Text style={styles.itemsSummaryTitle}>
-            {order.items.reduce(
-              (s, i) => s + (normalizeItem(i).quantity),
-              0,
-            )}{' '}
-            productos · {formatPrice(order.total)}
-          </Text>
-          {order.items.map((raw, idx) => {
-            const item = normalizeItem(raw);
-            return (
-              <Text key={idx} style={styles.itemLine}>
-                {item.quantity}x {item.name}
-              </Text>
-            );
-          })}
+        {/* ===== NAVIGATION BUTTONS (Primary CTA) ===== */}
+        <View style={styles.section}>
+          <TouchableOpacity style={styles.googleMapsBtn} onPress={openGoogleMaps} activeOpacity={0.8}>
+            <Ionicons name="navigate" size={24} color={colors.white} />
+            <View>
+              <Text style={styles.googleMapsBtnTitle}>Ir con Google Maps</Text>
+              <Text style={styles.googleMapsBtnSub}>Navegación paso a paso</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.wazeBtn} onPress={openWaze} activeOpacity={0.8}>
+            <Ionicons name="compass-outline" size={20} color={colors.primary} />
+            <Text style={styles.wazeBtnText}>Abrir con Waze</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Photo proof section */}
+        {/* Client info */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>CLIENTE</Text>
+          <View style={styles.card}>
+            <View style={styles.clientRow}>
+              <View style={styles.clientAvatar}>
+                <Ionicons name="person" size={20} color={colors.white} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.clientName}>{order.client_name || 'Cliente'}</Text>
+                {order.client_location_note && (
+                  <Text style={styles.clientNote} numberOfLines={2}>📍 {order.client_location_note}</Text>
+                )}
+              </View>
+              <Text style={styles.totalBig}>{formatPrice(order.total)}</Text>
+            </View>
+
+            {/* Contact buttons */}
+            {order.client_phone && (
+              <View style={styles.contactRow}>
+                <TouchableOpacity style={styles.contactBtn} onPress={callClient}>
+                  <Ionicons name="call" size={20} color={colors.primary} />
+                  <Text style={styles.contactBtnText}>Llamar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.contactBtn, styles.whatsappBtnStyle]} onPress={whatsappClient}>
+                  <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
+                  <Text style={[styles.contactBtnText, { color: '#25D366' }]}>WhatsApp</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* Items */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            PRODUCTOS · {order.items.reduce((s, i) => s + normalizeItem(i).quantity, 0)} items
+          </Text>
+          <View style={styles.card}>
+            {order.items.map((raw, idx) => {
+              const item = normalizeItem(raw);
+              return (
+                <Text key={idx} style={styles.itemLine}>
+                  {item.quantity}x {item.name}
+                  {item.options?.map((o, i) => ` + ${o.label}`).join('')}
+                </Text>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Photo proof */}
         {!isDelivered && (
-          <View style={styles.photoSection}>
-            <Text style={styles.photoSectionTitle}>📸 Foto de evidencia</Text>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>📸 FOTO DE EVIDENCIA</Text>
             {photoUri ? (
-              <View style={styles.photoPreview}>
-                <Image
-                  source={{ uri: photoUri }}
-                  style={styles.photoImage}
-                  resizeMode="cover"
-                />
-                <TouchableOpacity
-                  style={styles.retakeBtn}
-                  onPress={takeDeliveryPhoto}
-                >
+              <View style={styles.card}>
+                <Image source={{ uri: photoUri }} style={styles.photoImage} resizeMode="cover" />
+                <TouchableOpacity style={styles.retakeRow} onPress={takeDeliveryPhoto}>
                   <Ionicons name="camera" size={16} color={colors.primary} />
-                  <Text style={styles.retakeBtnText}>Volver a tomar</Text>
+                  <Text style={styles.retakeText}>Volver a tomar</Text>
                 </TouchableOpacity>
               </View>
             ) : (
-              <TouchableOpacity
-                style={styles.takePhotoBtn}
-                onPress={takeDeliveryPhoto}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="camera-outline" size={32} color={colors.primary} />
+              <TouchableOpacity style={styles.takePhotoBtn} onPress={takeDeliveryPhoto} activeOpacity={0.7}>
+                <Ionicons name="camera-outline" size={36} color={colors.primary} />
                 <Text style={styles.takePhotoText}>Tomar foto de entrega</Text>
-                <Text style={styles.takePhotoHint}>Evidencia para el restaurante y el cliente</Text>
+                <Text style={styles.takePhotoHint}>Evidencia para el restaurante</Text>
               </TouchableOpacity>
             )}
           </View>
         )}
 
-        {/* Complete delivery button */}
+        {/* Complete button */}
         {!isDelivered && (
-          <TouchableOpacity
-            style={[
-              styles.completeBtn,
-              completing && styles.buttonDisabled,
-            ]}
-            onPress={handleComplete}
-            disabled={completing}
-            activeOpacity={0.8}
-          >
-            {completing ? (
-              <ActivityIndicator color={colors.white} />
-            ) : (
-              <>
-                <Ionicons
-                  name="checkmark-circle"
-                  size={24}
-                  color={colors.white}
-                />
-                <Text style={styles.completeBtnText}>
-                  {photoUri ? 'Confirmar entrega con foto' : 'Marcar como entregado'}
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <View style={styles.section}>
+            <TouchableOpacity
+              style={[styles.completeBtn, completing && { opacity: 0.6 }]}
+              onPress={handleComplete}
+              disabled={completing}
+              activeOpacity={0.8}
+            >
+              {completing ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <>
+                  <Ionicons name="checkmark-circle" size={24} color={colors.white} />
+                  <Text style={styles.completeBtnText}>
+                    {photoUri ? 'Confirmar entrega con foto' : 'Marcar como entregado'}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
         )}
 
         {isDelivered && (
-          <TouchableOpacity
-            style={styles.backBtn}
-            onPress={() => navigation.popToTop()}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.backBtnText}>Volver al inicio</Text>
-          </TouchableOpacity>
+          <View style={styles.section}>
+            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.popToTop()}>
+              <Text style={styles.backBtnText}>Volver al inicio</Text>
+            </TouchableOpacity>
+          </View>
         )}
 
         <View style={{ height: 40 }} />
@@ -618,365 +414,120 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: colors.background,
+    flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background,
   },
-
-  // Map
-  mapSection: {
-    height: '45%',
-    backgroundColor: colors.background,
-    position: 'relative',
-  },
-  mapFallback: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f0f0f0',
-    gap: 8,
-  },
-  mapFallbackText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.textMuted,
-  },
-  mapFallbackHint: {
-    fontSize: 13,
-    color: colors.textSecondary,
-  },
-
-  // Markers
-  markerClient: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 3,
-    borderColor: colors.white,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  markerRestaurant: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: colors.tierra,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: colors.white,
-    elevation: 4,
-  },
-
-  // Status pill
-  statusPill: {
-    position: 'absolute',
-    top: spacing.xxl + spacing.md,
-    alignSelf: 'center',
+  // Header
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.white,
+    backgroundColor: colors.primary,
+    paddingTop: spacing.xxl + spacing.sm,
+    paddingBottom: spacing.md,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    borderRadius: radius.full,
     gap: spacing.sm,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 4,
   },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: colors.success,
-  },
-  statusPillText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textPrimary,
-  },
+  backArrow: { padding: 4 },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: colors.white },
+  headerSub: { fontSize: 13, color: 'rgba(255,255,255,0.8)', marginTop: 1 },
   etaBadge: {
-    backgroundColor: colors.primary + '15',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: radius.full,
   },
-  etaText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-
-  // Distance
-  distanceBadge: {
-    position: 'absolute',
-    top: spacing.xxl + spacing.md + 44,
-    alignSelf: 'center',
+  etaText: { fontSize: 14, fontWeight: '700', color: colors.white },
+  // Scroll
+  scroll: { flex: 1 },
+  // Info bar
+  infoBar: {
     flexDirection: 'row',
-    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
     backgroundColor: colors.white,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: radius.full,
-    gap: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  distanceText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.primary,
+  infoItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  infoItemText: { fontSize: 12, color: colors.textMuted },
+  // Sections
+  section: { paddingHorizontal: spacing.md, marginTop: spacing.md },
+  sectionTitle: {
+    fontSize: 12, fontWeight: '600', color: colors.textSecondary,
+    marginBottom: spacing.sm, letterSpacing: 0.5,
   },
-
-  // Bottom card
-  bottomCard: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    marginTop: -16,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 10,
+  card: {
+    backgroundColor: colors.white, borderRadius: radius.lg, padding: spacing.md,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05, shadowRadius: 4, elevation: 1,
   },
-
-  // GPS status
-  gpsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: spacing.md,
-  },
-  gpsText: {
-    fontSize: 12,
-    color: colors.textMuted,
-  },
-
-  // Client card
-  clientCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  clientAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.sm,
-  },
-  clientDetails: { flex: 1 },
-  clientName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textPrimary,
-  },
-  clientNote: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  clientPhone: {
-    fontSize: 13,
-    color: colors.primary,
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  totalText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-
-  // Navigation buttons
-  navButtons: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
+  // Google Maps button
   googleMapsBtn: {
-    flex: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: '#4285F4',
-    paddingVertical: 16,
-    borderRadius: radius.md,
-    shadowColor: '#4285F4',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    backgroundColor: '#4285F4', paddingVertical: 18, paddingHorizontal: spacing.lg,
+    borderRadius: radius.lg,
+    shadowColor: '#4285F4', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 8, elevation: 5,
   },
-  googleMapsBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.white,
-  },
+  googleMapsBtnTitle: { fontSize: 17, fontWeight: '700', color: colors.white },
+  googleMapsBtnSub: { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 1 },
   wazeBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 16,
-    borderRadius: radius.md,
-    borderWidth: 1.5,
-    borderColor: colors.primary,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, marginTop: spacing.sm, paddingVertical: 12,
+    borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.primary,
   },
-  wazeBtnText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primary,
+  wazeBtnText: { fontSize: 14, fontWeight: '600', color: colors.primary },
+  // Client
+  clientRow: { flexDirection: 'row', alignItems: 'center' },
+  clientAvatar: {
+    width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary,
+    justifyContent: 'center', alignItems: 'center', marginRight: spacing.sm,
   },
-
-  // Contact buttons
-  contactButtons: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
+  clientName: { fontSize: 16, fontWeight: '600', color: colors.textPrimary },
+  clientNote: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
+  totalBig: { fontSize: 18, fontWeight: '700', color: colors.textPrimary },
+  // Contact
+  contactRow: {
+    flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md,
+    borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md,
   },
   contactBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: radius.md,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    gap: 6,
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingVertical: 10, borderRadius: radius.md,
+    borderWidth: 1.5, borderColor: colors.primary,
   },
-  contactBtnText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primary,
+  contactBtnText: { fontSize: 14, fontWeight: '600', color: colors.primary },
+  whatsappBtnStyle: { borderColor: '#25D366' },
+  // Items
+  itemLine: { fontSize: 14, color: colors.textPrimary, paddingVertical: 4 },
+  // Photo
+  photoImage: { width: '100%', height: 180, borderRadius: radius.md },
+  retakeRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingTop: spacing.sm,
   },
-
-  // Items summary
-  itemsSummary: {
-    backgroundColor: colors.background,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  itemsSummaryTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
-  itemLine: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    marginBottom: 2,
-  },
-
-  // Complete button
-  completeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.success,
-    paddingVertical: 16,
-    borderRadius: radius.md,
-    shadowColor: colors.success,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  completeBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.white,
-  },
-  buttonDisabled: { opacity: 0.6 },
-
-  // Back button
-  backBtn: {
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderRadius: radius.md,
-    borderWidth: 1.5,
-    borderColor: colors.primary,
-  },
-  backBtnText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-
-  // Photo proof
-  photoSection: {
-    marginBottom: spacing.lg,
-  },
-  photoSectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
+  retakeText: { fontSize: 13, fontWeight: '600', color: colors.primary },
   takePhotoBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.lg,
+    alignItems: 'center', paddingVertical: spacing.xl,
+    borderRadius: radius.lg, borderWidth: 2,
+    borderColor: colors.primary + '30', borderStyle: 'dashed',
+    backgroundColor: colors.primaryFaint, gap: spacing.xs,
+  },
+  takePhotoText: { fontSize: 15, fontWeight: '600', color: colors.primary },
+  takePhotoHint: { fontSize: 12, color: colors.textMuted },
+  // Complete
+  completeBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: spacing.sm, backgroundColor: colors.success, paddingVertical: 18,
     borderRadius: radius.lg,
-    borderWidth: 2,
-    borderColor: colors.primary + '30',
-    borderStyle: 'dashed',
-    backgroundColor: colors.primaryFaint,
-    gap: spacing.xs,
+    shadowColor: colors.success, shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3, shadowRadius: 6, elevation: 4,
   },
-  takePhotoText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.primary,
+  completeBtnText: { fontSize: 17, fontWeight: '700', color: colors.white },
+  // Back
+  backBtn: {
+    alignItems: 'center', paddingVertical: 14, borderRadius: radius.md,
+    borderWidth: 1.5, borderColor: colors.primary,
   },
-  takePhotoHint: {
-    fontSize: 12,
-    color: colors.textMuted,
-  },
-  photoPreview: {
-    borderRadius: radius.lg,
-    overflow: 'hidden',
-    backgroundColor: colors.background,
-  },
-  photoImage: {
-    width: '100%',
-    height: 200,
-    borderRadius: radius.lg,
-  },
-  retakeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: spacing.sm,
-  },
-  retakeBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.primary,
-  },
+  backBtnText: { fontSize: 15, fontWeight: '600', color: colors.primary },
 });
