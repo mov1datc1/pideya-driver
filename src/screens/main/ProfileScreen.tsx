@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -6,13 +6,17 @@ import {
   StyleSheet,
   Alert,
   ScrollView,
+  Image,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
+import * as deliveryService from '../../services/delivery';
 import { colors, spacing, radius } from '../../constants/theme';
 
 export default function ProfileScreen() {
-  const { driver, restaurant, logout } = useAuth();
+  const { driver, restaurant, logout, updateDriverInfo } = useAuth();
+  const [uploading, setUploading] = useState(false);
 
   const handleLogout = () => {
     Alert.alert('Cerrar sesión', '¿Deseas cerrar tu sesión?', [
@@ -25,13 +29,104 @@ export default function ProfileScreen() {
     ]);
   };
 
+  const handleChangePhoto = async () => {
+    try {
+      const ImagePicker = require('expo-image-picker');
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permisos', 'Se necesitan permisos para acceder a las fotos.');
+        return;
+      }
+
+      Alert.alert('Foto de perfil', '¿De dónde quieres seleccionar tu foto?', [
+        {
+          text: 'Cámara',
+          onPress: async () => {
+            const { status: camStatus } = await ImagePicker.requestCameraPermissionsAsync();
+            if (camStatus !== 'granted') {
+              Alert.alert('Permisos', 'Se necesitan permisos de cámara.');
+              return;
+            }
+            const result = await ImagePicker.launchCameraAsync({
+              mediaTypes: ['images'],
+              allowsEditing: true,
+              aspect: [1, 1],
+              quality: 0.6,
+            });
+            if (!result.canceled && result.assets[0]) {
+              await uploadPhoto(result.assets[0].uri);
+            }
+          },
+        },
+        {
+          text: 'Galería',
+          onPress: async () => {
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ['images'],
+              allowsEditing: true,
+              aspect: [1, 1],
+              quality: 0.6,
+            });
+            if (!result.canceled && result.assets[0]) {
+              await uploadPhoto(result.assets[0].uri);
+            }
+          },
+        },
+        { text: 'Cancelar', style: 'cancel' },
+      ]);
+    } catch (err) {
+      console.warn('Photo picker error:', err);
+      Alert.alert('Error', 'No se pudo abrir el selector de fotos.');
+    }
+  };
+
+  const uploadPhoto = async (uri: string) => {
+    if (!driver) return;
+    setUploading(true);
+    try {
+      const url = await deliveryService.uploadDriverAvatar(driver.id, uri);
+      await deliveryService.updateDriverAvatar(url);
+      // Update local state
+      if (updateDriverInfo) {
+        updateDriverInfo({ avatar_url: url });
+      }
+      Alert.alert('✅ Listo', 'Tu foto de perfil ha sido actualizada.');
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'No se pudo subir la foto.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.avatar}>
-          <Ionicons name="person" size={40} color={colors.white} />
-        </View>
+        <TouchableOpacity
+          style={styles.avatarContainer}
+          onPress={handleChangePhoto}
+          activeOpacity={0.8}
+          disabled={uploading}
+        >
+          {driver?.avatar_url ? (
+            <Image
+              source={{ uri: driver.avatar_url }}
+              style={styles.avatarImage}
+            />
+          ) : (
+            <View style={styles.avatar}>
+              <Ionicons name="person" size={40} color={colors.white} />
+            </View>
+          )}
+          <View style={styles.cameraOverlay}>
+            {uploading ? (
+              <ActivityIndicator size="small" color={colors.white} />
+            ) : (
+              <Ionicons name="camera" size={16} color={colors.white} />
+            )}
+          </View>
+        </TouchableOpacity>
+        <Text style={styles.photoHint}>Toca para cambiar foto</Text>
         <Text style={styles.name}>{driver?.name}</Text>
         <Text style={styles.phone}>{driver?.phone}</Text>
         {driver?.vehicle_label && (
@@ -107,7 +202,7 @@ export default function ProfileScreen() {
             />
             <View style={styles.cardRowText}>
               <Text style={styles.cardLabel}>Versión</Text>
-              <Text style={styles.cardValue}>1.0.0</Text>
+              <Text style={styles.cardValue}>1.0.1</Text>
             </View>
           </View>
         </View>
@@ -139,14 +234,42 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xxl + spacing.lg,
     paddingBottom: spacing.xl,
   },
+  avatarContainer: {
+    position: 'relative',
+    marginBottom: spacing.sm,
+  },
   avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
     backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: spacing.md,
+  },
+  avatarImage: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.4)',
+  },
+  cameraOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    borderWidth: 3,
+    borderColor: colors.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photoHint: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.6)',
+    marginBottom: spacing.sm,
   },
   name: {
     fontSize: 24,

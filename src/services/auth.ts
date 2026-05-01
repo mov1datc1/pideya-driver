@@ -65,6 +65,7 @@ export const loginWithToken = async (
     name: row.driver_name,
     phone: row.driver_phone,
     vehicle_label: row.vehicle_label ?? null,
+    avatar_url: row.avatar_url ?? null,
     notes: null,
     is_active: row.is_active ?? true,
     push_token: row.push_token ?? null,

@@ -64,24 +64,66 @@ export const uploadDeliveryPhoto = async (
 
 /**
  * Marcar pedido como entregado, con foto opcional.
+ * Usa el RPC driver_complete_order (SECURITY DEFINER) para evitar
+ * problemas con RLS — el driver autentica via access_token.
  */
 export const completeDelivery = async (
   orderId: string,
   photoUrl?: string,
 ): Promise<void> => {
-  const updateData: Record<string, unknown> = {
-    status: 'DELIVERED',
-    delivered_at: new Date().toISOString(),
-  };
+  const token = await getToken();
 
-  if (photoUrl) {
-    updateData.delivery_photo_url = photoUrl;
+  const { error } = await supabase.rpc('driver_complete_order', {
+    p_access_token: token,
+    p_order_id: orderId,
+    p_photo_url: photoUrl || null,
+  });
+
+  if (error) throw new Error(error.message);
+};
+
+/**
+ * Upload driver avatar/profile photo to Supabase Storage.
+ * Returns the public URL of the uploaded image.
+ */
+export const uploadDriverAvatar = async (
+  driverId: string,
+  photoUri: string,
+): Promise<string> => {
+  const response = await fetch(photoUri);
+  const blob = await response.blob();
+
+  const fileName = `${driverId}_${Date.now()}.jpg`;
+  const filePath = `avatars/${fileName}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('delivery-photos')
+    .upload(filePath, blob, {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
+
+  if (uploadError) {
+    throw new Error('No se pudo subir la foto: ' + uploadError.message);
   }
 
-  const { error } = await supabase
-    .from('orders')
-    .update(updateData)
-    .eq('id', orderId);
+  const { data: urlData } = supabase.storage
+    .from('delivery-photos')
+    .getPublicUrl(filePath);
+
+  return urlData?.publicUrl || '';
+};
+
+/**
+ * Update driver profile avatar URL via RPC.
+ */
+export const updateDriverAvatar = async (avatarUrl: string): Promise<void> => {
+  const token = await getToken();
+
+  const { error } = await supabase.rpc('driver_update_avatar', {
+    p_access_token: token,
+    p_avatar_url: avatarUrl,
+  });
 
   if (error) throw new Error(error.message);
 };

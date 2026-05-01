@@ -14,6 +14,7 @@ interface AuthState {
 interface AuthContextValue extends AuthState {
   loginWithToken: (token: string) => Promise<void>;
   completePhoneVerify: () => void;
+  updateDriverInfo: (updates: Partial<DriverProfile>) => void;
   logout: () => Promise<void>;
 }
 
@@ -91,6 +92,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
+  const updateDriverInfo = (updates: Partial<DriverProfile>) => {
+    setState((s) => ({
+      ...s,
+      driver: s.driver ? { ...s.driver, ...updates } : null,
+    }));
+  };
+
   const logout = async () => {
     await authService.clearSession();
     setState({
@@ -104,7 +112,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   return (
     <AuthContext.Provider
-      value={{ ...state, loginWithToken, completePhoneVerify, logout }}
+      value={{ ...state, loginWithToken, completePhoneVerify, updateDriverInfo, logout }}
     >
       {children}
     </AuthContext.Provider>

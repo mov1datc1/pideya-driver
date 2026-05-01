@@ -46,6 +46,7 @@ export interface DriverProfile {
   name: string;
   phone: string;
   vehicle_label: string | null;
+  avatar_url: string | null;
   notes: string | null;
   is_active: boolean;
   push_token: string | null;
