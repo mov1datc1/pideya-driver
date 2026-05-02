@@ -2,6 +2,7 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import DashboardScreen from '../screens/main/DashboardScreen';
+import HistoryScreen from '../screens/main/HistoryScreen';
 import ProfileScreen from '../screens/main/ProfileScreen';
 import { colors } from '../constants/theme';
 import type { MainTabParamList } from '../types/navigation';
@@ -16,6 +17,11 @@ const tabConfig: Record<
     label: 'Pedidos',
     icon: 'receipt',
     iconOutline: 'receipt-outline',
+  },
+  HistoryTab: {
+    label: 'Historial',
+    icon: 'time',
+    iconOutline: 'time-outline',
   },
   ProfileTab: {
     label: 'Perfil',
@@ -51,6 +57,7 @@ export default function MainTabs() {
       })}
     >
       <Tab.Screen name="DashboardTab" component={DashboardScreen} />
+      <Tab.Screen name="HistoryTab" component={HistoryScreen} />
       <Tab.Screen name="ProfileTab" component={ProfileScreen} />
     </Tab.Navigator>
   );
