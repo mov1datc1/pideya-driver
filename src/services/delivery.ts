@@ -67,19 +67,29 @@ export const uploadDeliveryPhoto = async (
  * Usa el RPC driver_complete_order (SECURITY DEFINER) para evitar
  * problemas con RLS — el driver autentica via access_token.
  */
-export const completeDelivery = async (
-  orderId: string,
-  photoUrl?: string,
-): Promise<void> => {
+const pendingKey = '@pideya_pending_delivery';
+let syncing = false;
+export const syncPendingDelivery = async (): Promise<boolean> => {
+  if (syncing) return false;
+  syncing = true;
+  try {
+    const raw = await AsyncStorage.getItem(pendingKey);
+    if (!raw) return false;
+    const pending = JSON.parse(raw);
+    const token = await getToken();
+    if (pending.p_token !== token) throw new Error('Hay una entrega pendiente de otra sesión. Vuelve a esa sesión para sincronizarla.');
+    const { error } = await supabase.rpc('driver_complete_cash', pending);
+    if (error) throw new Error('Entrega pendiente de sincronizar: ' + error.message);
+    await AsyncStorage.removeItem(pendingKey);
+    return true;
+  } finally { syncing = false; }
+};
+export const completeDelivery = async (orderId: string, photoUrl?: string, cash = 0): Promise<void> => {
   const token = await getToken();
-
-  const { error } = await supabase.rpc('driver_complete_order', {
-    p_access_token: token,
-    p_order_id: orderId,
-    p_photo_url: photoUrl || null,
-  });
-
-  if (error) throw new Error(error.message);
+  const existing = await AsyncStorage.getItem(pendingKey);
+  if (existing && JSON.parse(existing).p_order_id !== orderId) throw new Error('Sincroniza la entrega anterior antes de registrar otra.');
+  await AsyncStorage.setItem(pendingKey, JSON.stringify({p_token: token, p_order_id: orderId, p_photo: photoUrl || null, p_cash: cash}));
+  await syncPendingDelivery();
 };
 
 /**

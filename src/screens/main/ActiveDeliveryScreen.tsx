@@ -59,8 +59,9 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
     return () => { mounted = false; };
   }, [orderId]);
 
-  // Start simple foreground GPS tracking
+  // Share GPS only after the assigned order is verified and delivery has started.
   useEffect(() => {
+    if (!order || order.status !== 'ON_THE_WAY') return;
     let mounted = true;
     let intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -72,6 +73,7 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
           return;
         }
 
+        if (!mounted) return;
         locationService.setActiveOrderId(orderId);
 
         // Get initial position
@@ -87,13 +89,16 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
 
         // Start foreground watch
         try {
+          if (!mounted) return;
           await locationService.startForegroundTracking();
+          if (!mounted) { await locationService.stopTracking(); return; }
           if (mounted) setGpsStatus('GPS activo · Compartiendo ubicación');
         } catch {
           if (mounted) setGpsStatus('GPS en modo básico');
         }
 
         // Also poll every 10 seconds to update UI
+        if (!mounted) return;
         intervalId = setInterval(async () => {
           try {
             const loc = await locationService.getCurrentLocation();
@@ -113,7 +118,7 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
       if (intervalId) clearInterval(intervalId);
       locationService.stopTracking().catch(() => {});
     };
-  }, [orderId]);
+  }, [orderId, order?.status]);
 
   // Real-time order updates — unique channel name to avoid collision with DashboardScreen
   useEffect(() => {
@@ -178,7 +183,7 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
       ? `¿Confirmas la entrega del pedido ${order.reference_code || '#' + order.order_number}?`
       : `¿Confirmas la entrega?\n\n⚠️ No tomaste foto de evidencia.`;
 
-    Alert.alert('Confirmar entrega', msg, [
+    Alert.alert('Confirmar entrega y cobro exacto', msg + `\n\nConfirmo que cobré $${order.payment_method === 'card' ? 0 : order.total}. Debo regresar y liquidar antes de otra salida.`, [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Sí, entregado',
@@ -189,7 +194,7 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
             if (photoUri) {
               photoUrl = await deliveryService.uploadDeliveryPhoto(order.id, photoUri);
             }
-            await deliveryService.completeDelivery(order.id, photoUrl || undefined);
+            await deliveryService.completeDelivery(order.id, photoUrl || undefined, order.payment_method === 'card' ? 0 : Number(order.total));
             await locationService.stopTracking().catch(() => {});
             Alert.alert(
               '¡Entrega completada!',

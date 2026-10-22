@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
+import { unregisterNotificationDevice } from './notificationDevice';
 import type { DriverProfile, Restaurant } from '../types/database';
 
 const DRIVER_TOKEN_KEY = '@pideya_driver_token';
@@ -57,6 +58,7 @@ export const loginWithToken = async (
   }
 
   const row = Array.isArray(data) ? data[0] : data;
+  if (row.is_active === false) throw new Error('Este repartidor está desactivado. Contacta al negocio.');
 
   const driver: DriverProfile = {
     id: row.driver_id,
@@ -168,6 +170,8 @@ export const restoreSession =
  * Limpia toda la sesión local.
  */
 export const clearSession = async (): Promise<void> => {
+  const token = await AsyncStorage.getItem(DRIVER_TOKEN_KEY);
+  await unregisterNotificationDevice(supabase, 'driver', token || undefined);
   await AsyncStorage.removeItem(DRIVER_TOKEN_KEY);
   await AsyncStorage.removeItem(DRIVER_PROFILE_KEY);
   await supabase.auth.signOut().catch(() => {});

@@ -4,6 +4,10 @@
  */
 
 export type OrderStatus =
+  | 'READY'
+  | 'PREPARING'
+  | 'PICKING'
+  | 'ADJUSTED'
   | 'PENDING'
   | 'ACCEPTED'
   | 'ON_THE_WAY'
@@ -68,6 +72,8 @@ export interface DriverLocation {
 }
 
 export interface Order {
+  payment_method?: string;
+  adjusted_total?: number | null;
   id: string;
   order_number: number;
   reference_code: string; // PY-XXXXXX

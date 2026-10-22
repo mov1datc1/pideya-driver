@@ -1,8 +1,10 @@
+import ShiftPanel from '../../components/ShiftPanel';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
   FlatList,
+  ScrollView,
   TouchableOpacity,
   StyleSheet,
   RefreshControl,
@@ -55,6 +57,8 @@ export default function DashboardScreen() {
     }, [fetchOrders]),
   );
 
+  useEffect(() => { const timer=setInterval(()=>void fetchOrders(),15000);return()=>clearInterval(timer); },[fetchOrders]);
+
   // Real-time subscription
   useEffect(() => {
     if (!driver) return;
@@ -64,7 +68,7 @@ export default function DashboardScreen() {
       (updatedOrder) => {
         setOrders((prev) => {
           const isActive =
-            updatedOrder.status === 'ACCEPTED' ||
+            updatedOrder.status === 'ACCEPTED' || updatedOrder.status === 'READY' ||
             updatedOrder.status === 'ON_THE_WAY';
 
           if (isActive) {
@@ -88,7 +92,7 @@ export default function DashboardScreen() {
 
   // Active delivery detection
   const activeDelivery = orders.find((o) => o.status === 'ON_THE_WAY');
-  const queuedOrders = orders.filter((o) => o.status === 'ACCEPTED');
+  const queuedOrders = orders.filter((o) => ['ACCEPTED','READY'].includes(o.status));
 
   // Banner animation
   useEffect(() => {
@@ -327,13 +331,14 @@ export default function DashboardScreen() {
           <Text style={styles.queueInfoText}>
             {queuedOrders.length} pedido
             {queuedOrders.length > 1 ? 's' : ''} en cola — se habilitarán
-            al terminar la entrega actual
+            al regresar y liquidar la entrega actual
           </Text>
         </View>
       )}
 
       {orders.length === 0 ? (
-        <View style={styles.emptyContainer}>
+        <ScrollView contentContainerStyle={styles.emptyContainer}>
+          <ShiftPanel />
           <View style={styles.emptyIcon}>
             <Ionicons
               name="bicycle-outline"
@@ -353,9 +358,10 @@ export default function DashboardScreen() {
             <Ionicons name="refresh" size={18} color={colors.primary} />
             <Text style={styles.refreshText}>Actualizar</Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       ) : (
         <FlatList
+          ListHeaderComponent={<ShiftPanel />}
           data={sortedOrders}
           keyExtractor={(o) => o.id}
           renderItem={renderOrder}

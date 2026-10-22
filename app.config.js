@@ -1,12 +1,14 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
+const staticConfig = require('./app.json').expo;
 const GOOGLE_MAPS_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
-module.exports = {
-  expo: {
+module.exports = ({ config }) => ({
+    ...config,
+    ...staticConfig,
     name: 'Pide ya - Repartidor',
     slug: 'pideya-driver',
-    version: '1.0.2',
+    version: staticConfig.version,
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
@@ -87,5 +89,4 @@ module.exports = {
       },
     },
     owner: 'pideya1',
-  },
-};
+});

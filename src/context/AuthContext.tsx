@@ -1,6 +1,9 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { DriverProfile, Restaurant } from '../types/database';
 import * as authService from '../services/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '../services/supabase';
+import { watchNotificationDevice } from '../services/notificationDevice';
 import { setupPushNotifications } from '../services/notifications';
 
 interface AuthState {
@@ -36,6 +39,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     isAuthenticated: false,
     needsPhoneVerify: false,
   });
+
+  useEffect(() => {
+    if (!state.driver?.id) return;
+    let disposed = false;
+    let stop = () => {};
+    AsyncStorage.getItem('@pideya_driver_token').then(token => {
+      if (!disposed && token) stop = watchNotificationDevice(supabase, 'driver', null, token);
+    }).catch(() => {});
+    return () => { disposed = true; stop(); };
+  }, [state.driver?.id]);
 
   // Restore session on app start
   useEffect(() => {
