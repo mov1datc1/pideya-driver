@@ -64,15 +64,14 @@ export const uploadDeliveryPhoto = async (
 
 /**
  * Marcar pedido como entregado, con foto opcional.
- * Usa el RPC driver_complete_order (SECURITY DEFINER) para evitar
+ * Usa el RPC driver_complete_cash (SECURITY DEFINER) para evitar
  * problemas con RLS — el driver autentica via access_token.
  */
 const pendingKey = '@pideya_pending_delivery';
-let syncing = false;
-export const syncPendingDelivery = async (): Promise<boolean> => {
-  if (syncing) return false;
-  syncing = true;
-  try {
+let syncTask: Promise<boolean> | null = null;
+export const syncPendingDelivery = (): Promise<boolean> => {
+  if (syncTask) return syncTask;
+  syncTask = (async () => { try {
     const raw = await AsyncStorage.getItem(pendingKey);
     if (!raw) return false;
     const pending = JSON.parse(raw);
@@ -82,14 +81,15 @@ export const syncPendingDelivery = async (): Promise<boolean> => {
     if (error) throw new Error('Entrega pendiente de sincronizar: ' + error.message);
     await AsyncStorage.removeItem(pendingKey);
     return true;
-  } finally { syncing = false; }
+  } finally { syncTask = null; } })();
+  return syncTask;
 };
 export const completeDelivery = async (orderId: string, photoUrl?: string, cash = 0): Promise<void> => {
   const token = await getToken();
   const existing = await AsyncStorage.getItem(pendingKey);
   if (existing && JSON.parse(existing).p_order_id !== orderId) throw new Error('Sincroniza la entrega anterior antes de registrar otra.');
   await AsyncStorage.setItem(pendingKey, JSON.stringify({p_token: token, p_order_id: orderId, p_photo: photoUrl || null, p_cash: cash}));
-  await syncPendingDelivery();
+  if (!await syncPendingDelivery() && !await syncPendingDelivery()) throw new Error('La confirmación está guardada y sigue pendiente de sincronizar.');
 };
 
 /**
