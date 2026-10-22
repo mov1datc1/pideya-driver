@@ -6,7 +6,7 @@ module.exports = {
   expo: {
     name: 'Pide ya - Repartidor',
     slug: 'pideya-driver',
-    version: '1.0.0',
+    version: '1.0.2',
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
@@ -22,8 +22,10 @@ module.exports = {
         {
           locationWhenInUsePermission:
             'Pide ya necesita tu ubicación para mostrar tu posición en el mapa.',
-          isAndroidBackgroundLocationEnabled: false,
-          isAndroidForegroundServiceEnabled: false,
+          locationAlwaysAndWhenInUsePermission:
+            'Pide ya necesita tu ubicación en segundo plano para el seguimiento continuo de entregas.',
+          isAndroidBackgroundLocationEnabled: true,
+          isAndroidForegroundServiceEnabled: true,
         },
       ],
       [
@@ -43,7 +45,7 @@ module.exports = {
     ],
     ios: {
       supportsTablet: false,
-      bundleIdentifier: 'com.pideya.driver',
+      bundleIdentifier: 'com.pideya.repartidores',
       config: {
         googleMapsApiKey: GOOGLE_MAPS_KEY,
       },
@@ -62,7 +64,8 @@ module.exports = {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#FFFFFF',
       },
-      package: 'com.pideya.driver',
+      package: 'com.pideya.repartidores',
+      versionCode: 5,
       config: {
         googleMaps: {
           apiKey: GOOGLE_MAPS_KEY,
@@ -71,6 +74,9 @@ module.exports = {
       permissions: [
         'ACCESS_FINE_LOCATION',
         'ACCESS_COARSE_LOCATION',
+        'ACCESS_BACKGROUND_LOCATION',
+        'FOREGROUND_SERVICE',
+        'FOREGROUND_SERVICE_LOCATION',
         'CAMERA',
         'VIBRATE',
       ],
