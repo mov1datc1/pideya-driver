@@ -336,7 +336,7 @@ export default function ActiveDeliveryScreen({ route, navigation }: Props) {
               <View style={{ flex: 1 }}>
                 <Text style={styles.clientName}>{order.client_name || 'Cliente'}</Text>
                 {order.client_location_note && (
-                  <Text style={styles.clientNote} numberOfLines={2}>📍 {order.client_location_note}</Text>
+                  <Text style={styles.clientNote}>📍 {order.client_location_note}</Text>
                 )}
               </View>
               <Text style={styles.totalBig}>{formatPrice(order.total)}</Text>
