@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "460490141482",
+    "project_id": "pideya-platform-2026",
+    "storage_bucket": "pideya-platform-2026.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:460490141482:android:24e3ebaf0b373b7b3bf853",
+        "android_client_info": {
+          "package_name": "com.movidatci.pideya"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBjZgHF1VZTgZFGJ4t1OjmURaT2VETG3yg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:460490141482:android:54aab3a06c2aca2f3bf853",
+        "android_client_info": {
+          "package_name": "com.movidatci.pideyarestaurant"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBjZgHF1VZTgZFGJ4t1OjmURaT2VETG3yg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:460490141482:android:ff39913454f57a453bf853",
+        "android_client_info": {
+          "package_name": "com.pideya.repartidores"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBjZgHF1VZTgZFGJ4t1OjmURaT2VETG3yg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
